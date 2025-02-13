@@ -13,7 +13,7 @@ import { Resizable } from 're-resizable'
 type Message = {
   id: number
   content: string
-  role: 'user' | 'ai'
+  role: 'user' | 'ai' | 'professor'
 }
 
 // 添加类型定义
@@ -63,6 +63,83 @@ const formatAIMessage = (text: string) => {
       </div>
     )
   })
+}
+
+// 添加评估函数
+const shouldAddProfessorComment = (question: string, answer: string): boolean => {
+  // 判断问题的复杂度
+  const complexityIndicators = [
+    '原理', '机制', '架构', '对比', '评估', '分析',
+    '为什么', '如何', '区别', '优缺点', '发展趋势'
+  ]
+  
+  const hasComplexity = complexityIndicators.some(indicator => 
+    question.includes(indicator)
+  )
+  
+  // 判断回答的深度
+  const answerLength = answer.length
+  const hasTechnicalTerms = /[A-Z]{2,}|[A-Za-z]+\d+|算法|模型|框架|技术|系统/.test(answer)
+  const hasStructure = answer.includes('\n') || /[1-9]\.|\-|\•/.test(answer)
+  
+  // 根据问题复杂度和回答质量决定是否需要点评
+  return hasComplexity || (answerLength > 100 && (hasTechnicalTerms || hasStructure))
+}
+
+// 添加可折叠消息组件
+const CollapsibleMessage = ({ content, role }: { content: string, role: Message['role'] }) => {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [shouldShowButton, setShouldShowButton] = useState(false)
+  const maxHeight = 300 // 设置最大高度为300px
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setShouldShowButton(contentRef.current.scrollHeight > maxHeight)
+    }
+  }, [content])
+
+  return (
+    <div>
+      <div
+        ref={contentRef}
+        className={cn(
+          "overflow-hidden transition-all duration-200",
+          !isExpanded && "max-h-[300px]"
+        )}
+      >
+        {role === 'ai' || role === 'professor'
+          ? formatAIMessage(content)
+          : <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{content}</p>
+        }
+      </div>
+      {shouldShowButton && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className={cn(
+            "w-full text-xs text-muted-foreground/80 hover:text-muted-foreground mt-2 flex items-center justify-center gap-1",
+            role === 'professor' && "text-orange-700/70 hover:text-orange-700"
+          )}
+        >
+          {isExpanded ? (
+            <>
+              收起内容
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                <path d="M18 15L12 9L6 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </>
+          ) : (
+            <>
+              展开更多
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                <path d="M6 9L12 15L18 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  )
 }
 
 const ChatInterface = () => {
@@ -130,6 +207,93 @@ const ChatInterface = () => {
     } catch (error) {
       console.error('搜索失败:', error);
       throw error;
+    }
+  }
+
+  // 修改教授点评函数
+  const addProfessorComment = async (aiMessage: Message, userMessage: Message) => {
+    try {
+      const professorPrompt = `作为一位资深的AI领域教授，请对以下对话进行专业点评。
+      
+用户问题：${userMessage.content}
+
+AI助手回答：${aiMessage.content}
+
+请从专业角度对这个回答进行分析。重点关注：
+1. 回答中的关键技术概念是否准确
+2. 论述是否有理论支撑
+3. 是否遗漏了重要观点
+4. 对实际应用的指导价值
+
+要求：
+- 保持学术严谨性，必要时引用相关研究或最新进展
+- 如发现明显疏漏，请补充必要的知识点
+- 点评要简洁专业，避免冗长
+- 如果回答已经很完善，可以从更高的视角进行延伸或补充
+
+请以"从学术角度来看..."或"从专业视角分析..."开始您的点评。`
+
+      const response = await fetch(API_CONFIG.baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${API_CONFIG.apiKey}`
+        },
+        body: JSON.stringify({
+          model: API_CONFIG.model,
+          messages: [
+            {
+              role: 'user',
+              content: professorPrompt
+            }
+          ],
+          stream: true,
+          temperature: 0.7, // 适当降低随机性
+          max_tokens: 1000  // 允许更长的回答
+        }),
+        signal: abortControllerRef.current.signal
+      })
+
+      if (!response.ok) throw new Error('API请求失败')
+
+      // 创建教授消息
+      const professorMessage: Message = {
+        id: Date.now() + 2,
+        content: '',
+        role: 'professor'
+      }
+      setMessages(prev => [...prev, professorMessage])
+
+      // 处理流式响应
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+
+      while (reader) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const data: StreamChunk = JSON.parse(line.slice(6))
+              const content = data.choices[0]?.delta?.content || ''
+              
+              setMessages(prev => prev.map(msg => 
+                msg.id === professorMessage.id 
+                  ? { ...msg, content: msg.content + content }
+                  : msg
+              ))
+            } catch (e) {
+              console.error('解析响应数据失败:', e)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('教授点评生成失败:', error)
     }
   }
 
@@ -224,6 +388,11 @@ const ChatInterface = () => {
           }
         }
       }
+
+      // 判断是否需要添加教授点评
+      if (shouldAddProfessorComment(userMessage.content, aiMessage.content)) {
+        await addProfessorComment(aiMessage, userMessage)
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.log('请求被取消')
@@ -252,13 +421,13 @@ const ChatInterface = () => {
   }, [messages])
 
   return (
-    <div className="w-full h-[100vh] p-4 flex items-center justify-center">
+    <div className="w-full h-[100vh] pt-4 flex items-start justify-center">
       <Resizable
         size={size}
         onResizeStop={(e, direction, ref, d) => {
           setSize({
-            width: size.width,
-            height: size.height + d.height
+            width: direction === 'bottom' ? size.width : size.width + d.width,
+            height: direction === 'bottom' ? size.height + d.height : size.height
           })
         }}
         minHeight={minHeight}
@@ -292,37 +461,56 @@ const ChatInterface = () => {
           <CardContent className="flex-1 overflow-auto p-6 space-y-6 min-h-0 scroll-smooth">
             <div className="space-y-6">
               {messages.map((message) => (
-                <div key={message.id} className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : ''}`}>
-                  {message.role === 'ai' && (
-                    <Avatar className="h-8 w-8 ring-2 ring-primary/10">
-                      <AvatarImage src="/ai-avatar.png" alt="AI Avatar" />
-                      <AvatarFallback className="bg-primary/10 text-primary text-sm">AI</AvatarFallback>
+                <div key={message.id} className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {(message.role === 'ai' || message.role === 'professor') && (
+                    <Avatar className="h-8 w-8 ring-2 ring-primary/10 flex-shrink-0">
+                      <AvatarImage 
+                        src={message.role === 'professor' ? "/professor-avatar.png" : "/ai-avatar.png"} 
+                        alt={message.role === 'professor' ? "Professor Avatar" : "AI Avatar"} 
+                      />
+                      <AvatarFallback 
+                        className={cn(
+                          "text-sm",
+                          message.role === 'professor' 
+                            ? "bg-orange-100 text-orange-700" 
+                            : "bg-primary/10 text-primary"
+                        )}
+                      >
+                        {message.role === 'professor' ? 'P' : 'AI'}
+                      </AvatarFallback>
                     </Avatar>
                   )}
-                  <div className={`flex-1 ${message.role === 'user' ? 'max-w-[85%]' : 'max-w-[90%]'}`}>
+                  <div className={cn(
+                    "flex",
+                    message.role === 'user' ? 'justify-end' : 'justify-start',
+                    "min-w-0 max-w-[85%]"
+                  )}>
                     <div 
                       className={cn(
-                        "rounded-2xl px-4 py-3 shadow-sm break-words",
+                        "rounded-2xl px-4 py-3 shadow-sm break-words inline-block",
                         message.role === 'user' 
-                          ? "bg-primary text-primary-foreground ml-auto" 
-                          : "bg-muted/50 backdrop-blur-sm"
+                          ? "bg-primary text-primary-foreground rounded-tr-sm"
+                          : message.role === 'professor'
+                            ? "bg-gradient-to-br from-orange-50 to-amber-50 text-orange-900 rounded-tl-sm border border-orange-200/50"
+                            : "bg-muted/50 backdrop-blur-sm rounded-tl-sm"
                       )}
                     >
-                      {message.role === 'ai' 
-                        ? formatAIMessage(message.content)
-                        : <p className="text-[15px] leading-relaxed">{message.content}</p>
-                      }
+                      {message.role === 'professor' && (
+                        <div className="text-orange-800/70 text-xs mb-2 font-medium">
+                          学术点评
+                        </div>
+                      )}
+                      <CollapsibleMessage content={message.content} role={message.role} />
                     </div>
                   </div>
                   {message.role === 'user' && (
-                    <Avatar className="h-8 w-8 ring-2 ring-primary/10">
+                    <Avatar className="h-8 w-8 ring-2 ring-primary/10 flex-shrink-0">
                       <AvatarImage src="/user-avatar.png" alt="User Avatar" />
                       <AvatarFallback className="bg-primary/10 text-primary text-sm">U</AvatarFallback>
                     </Avatar>
                   )}
                 </div>
               ))}
-              {/* 添加这个 div 作为滚动目标 */}
               <div ref={messagesEndRef} />
             </div>
           </CardContent>
