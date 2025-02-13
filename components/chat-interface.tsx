@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Paperclip, Globe, Mic, Send } from 'lucide-react'
+import { cn } from "@/lib/utils"
+import { Resizable } from 're-resizable'
 
 // 定义消息类型
 type Message = {
@@ -38,7 +40,33 @@ const API_CONFIG = {
   searchApiUrl: '/api/search' // 我们将添加一个新的API路由来处理搜索
 }
 
+// 添加一个格式化文本的工具函数
+const formatAIMessage = (text: string) => {
+  return text.split('\n').map((line, index) => {
+    const isListItem = /^[•*-]|^\d+\./.test(line.trim())
+    const isHeading = /^#+\s/.test(line.trim())
+    const isQuote = /^>/.test(line.trim())
+    
+    return (
+      <div 
+        key={index} 
+        className={cn(
+          "text-[15px] leading-relaxed",
+          !line.trim() && "h-4",
+          isListItem && "pl-5 relative before:absolute before:left-1 before:content-['•'] before:text-primary/70",
+          isHeading && "text-lg font-medium tracking-tight my-3",
+          isQuote && "pl-4 border-l-2 border-primary/30 italic text-muted-foreground my-2",
+          !isListItem && !isHeading && !isQuote && line.trim() && "my-2"
+        )}
+      >
+        {isListItem ? line.trim().replace(/^[•*-]|\d+\.\s*/, '') : line}
+      </div>
+    )
+  })
+}
+
 const ChatInterface = () => {
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   // 添加状态管理
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -61,6 +89,13 @@ const ChatInterface = () => {
   const [isLoading, setIsLoading] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [isWebEnabled, setIsWebEnabled] = useState(false)
+  const [size, setSize] = useState({
+    width: '100%',
+    height: '700px'
+  })
+  const minHeight = 400 // 最小高度
+  const minWidth = 320 // 最小宽度
+  const maxWidth = 1200 // 最大宽度
   
   // 取消未完成的请求
   useEffect(() => {
@@ -126,7 +161,6 @@ const ChatInterface = () => {
           messageContent = systemPrompt;
         } catch (error) {
           console.error('搜索失败:', error);
-          // 如果搜索失败，回退到普通对话
           messageContent = inputValue;
         }
       }
@@ -195,7 +229,6 @@ const ChatInterface = () => {
         console.log('请求被取消')
       } else {
         console.error('发送消息失败:', error)
-        // 添加错误提示消息
         setMessages(prev => [...prev, {
           id: Date.now() + 2,
           content: '抱歉，发送消息时出现错误。',
@@ -208,68 +241,149 @@ const ChatInterface = () => {
     }
   }
 
+  // 添加滚动到底部的函数
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  // 当消息更新时自动滚动
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
   return (
-    <Card className="w-full max-w-3xl mx-auto h-[600px] flex flex-col">
-      <CardContent className="flex-1 overflow-auto p-4 space-y-4">
-        <div className="space-y-4">
-          {messages.map((message) => (
-            <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
-              {message.role === 'ai' && (
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src="/placeholder.svg" alt="AI Avatar" />
-                  <AvatarFallback>AI</AvatarFallback>
-                </Avatar>
-              )}
-              <div className={`flex-1 ${message.role === 'user' ? 'max-w-[80%]' : ''}`}>
-                <div className={`rounded-lg p-4 ${
-                  message.role === 'user' 
-                    ? 'bg-primary text-primary-foreground' 
-                    : 'bg-muted'
-                }`}>
-                  {message.content}
+    <div className="w-full h-[100vh] p-4 flex items-center justify-center">
+      <Resizable
+        size={size}
+        onResizeStop={(e, direction, ref, d) => {
+          setSize({
+            width: size.width,
+            height: size.height + d.height
+          })
+        }}
+        minHeight={minHeight}
+        maxWidth={maxWidth}
+        minWidth={minWidth}
+        enable={{
+          top: false,
+          right: true,
+          bottom: true,
+          left: true,
+          topRight: false,
+          bottomRight: true,
+          bottomLeft: true,
+          topLeft: false
+        }}
+        className="relative"
+      >
+        <Card className="w-full h-full flex flex-col bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 hover:opacity-100 transition-opacity">
+            <svg 
+              viewBox="0 0 24 24" 
+              className="w-full h-full text-muted-foreground/30"
+            >
+              <path 
+                fill="currentColor" 
+                d="M22 22H20V20H22V22ZM22 18H20V16H22V18ZM18 22H16V20H18V22ZM18 18H16V16H18V18ZM14 22H12V20H14V22Z"
+              />
+            </svg>
+          </div>
+
+          <CardContent className="flex-1 overflow-auto p-6 space-y-6 min-h-0 scroll-smooth">
+            <div className="space-y-6">
+              {messages.map((message) => (
+                <div key={message.id} className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : ''}`}>
+                  {message.role === 'ai' && (
+                    <Avatar className="h-8 w-8 ring-2 ring-primary/10">
+                      <AvatarImage src="/ai-avatar.png" alt="AI Avatar" />
+                      <AvatarFallback className="bg-primary/10 text-primary text-sm">AI</AvatarFallback>
+                    </Avatar>
+                  )}
+                  <div className={`flex-1 ${message.role === 'user' ? 'max-w-[85%]' : 'max-w-[90%]'}`}>
+                    <div 
+                      className={cn(
+                        "rounded-2xl px-4 py-3 shadow-sm break-words",
+                        message.role === 'user' 
+                          ? "bg-primary text-primary-foreground ml-auto" 
+                          : "bg-muted/50 backdrop-blur-sm"
+                      )}
+                    >
+                      {message.role === 'ai' 
+                        ? formatAIMessage(message.content)
+                        : <p className="text-[15px] leading-relaxed">{message.content}</p>
+                      }
+                    </div>
+                  </div>
+                  {message.role === 'user' && (
+                    <Avatar className="h-8 w-8 ring-2 ring-primary/10">
+                      <AvatarImage src="/user-avatar.png" alt="User Avatar" />
+                      <AvatarFallback className="bg-primary/10 text-primary text-sm">U</AvatarFallback>
+                    </Avatar>
+                  )}
+                </div>
+              ))}
+              {/* 添加这个 div 作为滚动目标 */}
+              <div ref={messagesEndRef} />
+            </div>
+          </CardContent>
+          
+          <CardFooter className="border-t p-6 shrink-0">
+            <form onSubmit={handleSendMessage} className="flex w-full gap-3 items-center">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                type="button" 
+                disabled={isLoading}
+                className="hover:bg-muted"
+              >
+                <Paperclip className="h-5 w-5 text-muted-foreground" />
+              </Button>
+              <div className="flex-1 relative">
+                <Input 
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder='发送消息...'
+                  className="pr-24 py-5 text-base bg-muted/50 border-muted-foreground/20 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:ring-offset-0"
+                  disabled={isLoading}
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+                  <Button 
+                    variant={isWebEnabled ? "default" : "ghost"} 
+                    size="icon" 
+                    type="button" 
+                    disabled={isLoading}
+                    onClick={() => setIsWebEnabled(!isWebEnabled)}
+                    className={cn(
+                      "h-8 w-8",
+                      !isWebEnabled && "hover:bg-muted text-muted-foreground"
+                    )}
+                  >
+                    <Globe className="h-4 w-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    type="button" 
+                    disabled={isLoading}
+                    className="h-8 w-8 hover:bg-muted text-muted-foreground"
+                  >
+                    <Mic className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
-              {message.role === 'user' && (
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src="/placeholder.svg" alt="User Avatar" />
-                  <AvatarFallback>U</AvatarFallback>
-                </Avatar>
-              )}
-            </div>
-          ))}
-        </div>
-      </CardContent>
-      
-      <CardFooter className="border-t p-4">
-        <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-center">
-          <Button variant="outline" size="icon" type="button" disabled={isLoading}>
-            <Paperclip className="h-4 w-4" />
-          </Button>
-          <Input 
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder='给"ChatGPT"发送消息'
-            className="flex-1"
-            disabled={isLoading}
-          />
-          <Button 
-            variant={isWebEnabled ? "default" : "outline"} 
-            size="icon" 
-            type="button" 
-            disabled={isLoading}
-            onClick={() => setIsWebEnabled(!isWebEnabled)}
-          >
-            <Globe className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="icon" type="button" disabled={isLoading}>
-            <Mic className="h-4 w-4" />
-          </Button>
-          <Button type="submit" size="icon" disabled={isLoading}>
-            <Send className="h-4 w-4" />
-          </Button>
-        </form>
-      </CardFooter>
-    </Card>
+              <Button 
+                type="submit" 
+                size="icon" 
+                disabled={isLoading}
+                className="h-11 w-11 rounded-xl"
+              >
+                <Send className="h-5 w-5" />
+              </Button>
+            </form>
+          </CardFooter>
+        </Card>
+      </Resizable>
+    </div>
   )
 }
 
