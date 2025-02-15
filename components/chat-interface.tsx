@@ -143,6 +143,7 @@ const CollapsibleMessage = ({ content, role }: { content: string, role: Message[
 }
 
 const ChatInterface = () => {
+<<<<<<< Updated upstream
   const messagesEndRef = useRef<HTMLDivElement>(null)
   // 添加状态管理
   const [messages, setMessages] = useState<Message[]>([
@@ -162,6 +163,17 @@ const ChatInterface = () => {
       role: "ai"
     }
   ])
+=======
+  // 修改状态初始化
+  const [messages, setMessages] = useState<Message[]>(() => {
+    // 从 localStorage 读取历史消息
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('chatHistory')
+      return saved ? JSON.parse(saved) : []
+    }
+    return []
+  })
+>>>>>>> Stashed changes
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -174,6 +186,19 @@ const ChatInterface = () => {
   const minWidth = 320 // 最小宽度
   const maxWidth = 1200 // 最大宽度
   
+  // 添加消息保存效果
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem('chatHistory', JSON.stringify(messages))
+    }
+  }, [messages])
+
+  // 添加清除历史的函数
+  const clearHistory = () => {
+    setMessages([])
+    localStorage.removeItem('chatHistory')
+  }
+
   // 取消未完成的请求
   useEffect(() => {
     return () => {
@@ -421,6 +446,7 @@ AI助手回答：${aiMessage.content}
   }, [messages])
 
   return (
+<<<<<<< Updated upstream
     <div className="w-full h-[100vh] pt-4 flex items-start justify-center">
       <Resizable
         size={size}
@@ -557,6 +583,35 @@ AI助手回答：${aiMessage.content}
                   >
                     <Mic className="h-4 w-4" />
                   </Button>
+=======
+    <Card className="w-full max-w-3xl mx-auto h-[600px] flex flex-col">
+      <div className="p-4 border-b flex justify-end">
+        <Button 
+          variant="outline" 
+          size="sm"
+          onClick={clearHistory}
+        >
+          清除历史记录
+        </Button>
+      </div>
+      <CardContent className="flex-1 overflow-auto p-4 space-y-4">
+        <div className="space-y-4">
+          {messages.map((message) => (
+            <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
+              {message.role === 'ai' && (
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src="/placeholder.svg" alt="AI Avatar" />
+                  <AvatarFallback>AI</AvatarFallback>
+                </Avatar>
+              )}
+              <div className={`flex-1 ${message.role === 'user' ? 'max-w-[80%]' : ''}`}>
+                <div className={`rounded-lg p-4 ${
+                  message.role === 'user' 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-muted'
+                }`}>
+                  {message.content}
+>>>>>>> Stashed changes
                 </div>
               </div>
               <Button 
