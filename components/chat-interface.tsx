@@ -35,7 +35,7 @@ type SearchResult = {
 // 添加配置常量
 const API_CONFIG = {
   baseUrl: 'https://api.siliconflow.cn/v1/chat/completions',
-  model: 'deepseek-ai/deepseek-vl2', // 选择您想使用的模型
+  model: 'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B', // 选择您想使用的模型
   apiKey: process.env.NEXT_PUBLIC_SILICON_API_KEY || '', // 请确保在.env.local中设置此环境变量
   searchApiUrl: '/api/search' // 我们将添加一个新的API路由来处理搜索
 }
@@ -142,6 +142,48 @@ const CollapsibleMessage = ({ content, role }: { content: string, role: Message[
   )
 }
 
+// 添加加载状态组件
+const LoadingMessage = () => {
+  const [dots, setDots] = useState('...')
+  const loadingTexts = [
+    '正在联网搜索相关信息',
+    '正在整理搜索结果',
+    '正在思考如何更好地回答您的问题',
+    '马上就好'
+  ]
+  const [currentText, setCurrentText] = useState(loadingTexts[0])
+  
+  useEffect(() => {
+    const dotsInterval = setInterval(() => {
+      setDots(prev => prev.length >= 3 ? '.' : prev + '.')
+    }, 500)
+    
+    const textInterval = setInterval(() => {
+      setCurrentText(prev => {
+        const currentIndex = loadingTexts.indexOf(prev)
+        return loadingTexts[(currentIndex + 1) % loadingTexts.length]
+      })
+    }, 3000)
+    
+    return () => {
+      clearInterval(dotsInterval)
+      clearInterval(textInterval)
+    }
+  }, [])
+  
+  return (
+    <div className="flex items-center gap-2 text-muted-foreground/70 text-sm">
+      <div className="animate-spin h-4 w-4">
+        <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      </div>
+      <span className="animate-pulse">{currentText}{dots}</span>
+    </div>
+  )
+}
+
 const ChatInterface = () => {
 <<<<<<< Updated upstream
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -208,30 +250,30 @@ const ChatInterface = () => {
     }
   }, [])
 
-  // 添加搜索函数
+  // 修改搜索函数
   const searchWeb = async (query: string): Promise<string> => {
     try {
-      const response = await fetch(API_CONFIG.searchApiUrl, {
+      const response = await fetch('/api/search', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ query })
-      });
+      })
       
       if (!response.ok) {
-        throw new Error('搜索请求失败');
+        throw new Error('搜索请求失败')
       }
       
-      const searchResults: SearchResult[] = await response.json();
+      const searchResults = await response.json()
       
-      // 将搜索结果格式化为文本
-      return searchResults.map(result => 
+      // 格式化搜索结果
+      return searchResults.map((result: SearchResult) => 
         `标题: ${result.title}\n链接: ${result.link}\n摘要: ${result.snippet}\n\n`
-      ).join('---\n');
+      ).join('---\n')
     } catch (error) {
-      console.error('搜索失败:', error);
-      throw error;
+      console.error('搜索失败:', error)
+      throw error
     }
   }
 
@@ -276,7 +318,7 @@ AI助手回答：${aiMessage.content}
           temperature: 0.7, // 适当降低随机性
           max_tokens: 1000  // 允许更长的回答
         }),
-        signal: abortControllerRef.current.signal
+        signal: abortControllerRef.current?.signal
       })
 
       if (!response.ok) throw new Error('API请求失败')
@@ -322,38 +364,45 @@ AI助手回答：${aiMessage.content}
     }
   }
 
-  // 修改发送消息处理函数
+  // 修改消息发送函数
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!inputValue.trim() || isLoading) return
-
+    
+    // 初始化 abortController
+    abortControllerRef.current = new AbortController()
+    
     const userMessage: Message = {
       id: Date.now(),
       content: inputValue,
       role: 'user'
     }
+    
     setMessages(prev => [...prev, userMessage])
     setInputValue("")
     setIsLoading(true)
-
-    abortControllerRef.current = new AbortController()
-
+    
     try {
-      let messageContent = inputValue;
-      let systemPrompt = '';
+      let messageContent = inputValue
+      let systemPrompt = ''
       
       // 如果启用了联网功能，先进行网络搜索
       if (isWebEnabled) {
         try {
-          const searchResults = await searchWeb(inputValue);
-          systemPrompt = `以下是关于"${inputValue}"的网络搜索结果：\n\n${searchResults}\n请根据以上搜索结果，对用户的问题"${inputValue}"进行全面的回答。`;
-          messageContent = systemPrompt;
+          const searchResults = await searchWeb(inputValue)
+          systemPrompt = `我已经为您搜索到以下相关信息：\n\n${searchResults}\n\n基于以上搜索结果，请对问题"${inputValue}"进行全面的回答。请注意：
+1. 综合搜索结果中的关键信息
+2. 保持回答的准确性和客观性
+3. 适当引用来源
+4. 用通俗易懂的方式解释专业概念`
+          messageContent = systemPrompt
         } catch (error) {
-          console.error('搜索失败:', error);
-          messageContent = inputValue;
+          console.error('搜索失败:', error)
+          // 搜索失败时回退到直接使用用户输入
+          messageContent = inputValue
         }
       }
-
+      
       const response = await fetch(API_CONFIG.baseUrl, {
         method: 'POST',
         headers: {
@@ -370,7 +419,7 @@ AI助手回答：${aiMessage.content}
           ],
           stream: true
         }),
-        signal: abortControllerRef.current.signal
+        signal: abortControllerRef.current?.signal
       })
 
       if (!response.ok) {
@@ -537,6 +586,14 @@ AI助手回答：${aiMessage.content}
                   )}
                 </div>
               ))}
+              {isLoading && (
+                <div className="flex items-start gap-3 px-4 py-2">
+                  <Avatar className="h-8 w-8 ring-2 ring-primary/10">
+                    <AvatarFallback>AI</AvatarFallback>
+                  </Avatar>
+                  <LoadingMessage />
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
           </CardContent>
